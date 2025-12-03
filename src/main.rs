@@ -1,3 +1,8 @@
+#![allow(unused_variables)]
+#![allow(unused_mut)]
+#![allow(dead_code)]
+
+
 mod constants;
 mod sprite_format;
 
@@ -7,10 +12,18 @@ use bevy::render::settings::{Backends, WgpuSettings};
 use bevy_egui::*;
 use egui::{FontId, Frame, Pos2};
 use crate::constants::*;
-
+use crate::sprite_format::SpriteType;
 
 #[derive(Resource)]
-struct FileName(String, bool);
+struct FileName(String);
+
+
+#[derive(Resource, Eq, PartialEq)]
+enum EditorStep {
+    None,
+    FileCreated,
+    SettingsSet,
+}
 
 fn main() {
     App::new()
@@ -29,8 +42,9 @@ fn main() {
             }),
             ..default()
         }))
-        .insert_resource(sprite_format::Sprite::default())
-        .insert_resource((FileName("".to_owned(), false)))
+        .insert_resource(EditorStep::None)
+        .insert_resource(SpriteType::default())
+        .insert_resource(FileName("".to_owned()))
         .add_plugins(EguiPlugin)
         .add_systems(Update, (
                 main_window,
@@ -44,72 +58,106 @@ fn main() {
 fn editor_window(
     mut egui_ctx: EguiContexts,
     file_name: Res<FileName>,
-    mut sprite: ResMut<sprite_format::Sprite>,
+    mut sprite: ResMut<SpriteType>,
+    mut editor_step: ResMut<EditorStep>,
 ) {
     let gui = egui::Window::new("Sprite settings")
         .title_bar(true)
         .resizable(true)
         .movable(true)
-        .default_pos(Pos2::new(400.0, 0.0))
+        .default_pos(Pos2::new(0.0, 0.0))
         .frame(Frame {
             fill: MENU_BG,
             ..default()
         });
-
+    let mut apply_clicked = false;
     gui.show(egui_ctx.ctx_mut(), |ui| {
         ui.style_mut()
             .override_font_id = Some(FontId::new(
-            14.0,
-                egui::FontFamily::Monospace,
+            FONT_SIZE,
+                FONT,
         ));
-        if file_name.1 == false {
+        if *editor_step == EditorStep::None {
             ui.heading("Waiting for File creating/loading!");
             return;
         }
 
-        ui.heading("Editor");
-        ui.horizontal(|ui| {
-            ui.label("Width");
-            ui.text_edit_singleline(&mut sprite.width);
-        });
+        if *editor_step == EditorStep::FileCreated {
+            ui.heading("Editor");
+            ui.horizontal(|ui| {
+                ui.label("Width");
+                ui.text_edit_singleline(&mut sprite.width);
+            });
 
-        ui.horizontal(|ui| {
-            ui.label("Height");
-            ui.text_edit_singleline(&mut sprite.height);
-        });
+            ui.horizontal(|ui| {
+                ui.label("Height");
+                ui.text_edit_singleline(&mut sprite.height);
+            });
 
-        ui.horizontal(|ui| {
-            ui.label("Add frame");
-            let add = ui.button("+");
-            if add.clicked() {
-                sprite.add_frame();
-                let new_ind = sprite.ind.clone().saturating_add(1);
-                sprite.move_ind(new_ind);
-            }
-        });
+            ui.horizontal(|ui| {
+                let apply = ui.add(
+                    egui::Button::new("Apply")
+                        .rounding(2.0)
+                );
 
-        ui.label(format!("Index: {}", sprite.ind));
+                ui.label(
+                    egui::RichText::new("You can only do this once!")
+                        .size(FONT_SIZE / 2.)
+                        .color(FONT_COLOR)
+                        .monospace()
+                );
 
-        ui.horizontal(|ui| {
-            ui.separator();
-            let move_left = ui.button("<");
-            ui.separator();
-            let move_right = ui.button(">");
-
-            if move_left.clicked() {
-                let new_ind = sprite.ind.saturating_sub(1).clone();
-                sprite.move_ind(new_ind);
-            }
-
-            if move_right.clicked() {
-                let new_ind = sprite.ind.saturating_add(1).clone();
-                sprite.move_ind(new_ind);
-            }
-
-        });
+                if apply.clicked() {
+                    apply_clicked = true;
+                }
+            });
+        }
 
 
+        if *editor_step == EditorStep::SettingsSet {
+            ui.label(
+                egui::RichText::new(format!("{}.guspr", file_name.0))
+                    .size(FONT_SIZE * 1.5)
+                    .heading()
+            );
 
+            ui.horizontal(|ui| {
+                ui.label("Add frame");
+                let add = ui.button("+");
+                if add.clicked() {
+                    sprite.add_frame();
+                    let new_ind = sprite.ind.unwrap_or(0).clone().saturating_add(1);
+                    sprite.move_ind(new_ind);
+                }
+            });
+
+            match sprite.ind {
+                None => { ui.label("No frames yet"); }
+                Some(ok) => {
+                    ui.label(format!("Index: {:?}", ok));
+                    ui.horizontal(|ui| {
+                        ui.separator();
+                        let move_left = ui.button("<");
+                        ui.separator();
+                        let move_right = ui.button(">");
+
+                        if move_left.clicked() {
+                            let new_ind = ok.saturating_sub(1).clone();
+                            sprite.move_ind(new_ind);
+                        }
+
+                        if move_right.clicked() {
+                            let new_ind = ok.saturating_add(1).clone();
+                            sprite.move_ind(new_ind);
+                        }
+                    });
+                }
+            };
+        }
+
+        if apply_clicked {
+            *editor_step = EditorStep::SettingsSet;
+        }
     });
 }
 
@@ -118,7 +166,12 @@ fn editor_window(
 fn main_window(
     mut egui_ctx: EguiContexts,
     mut file_name: ResMut<FileName>,
+    mut editor_step: ResMut<EditorStep>,
 ) {
+    if *editor_step != EditorStep::None {
+        return;
+    }
+
     let gui = egui::Window::new("Main")
         .title_bar(true)
         .resizable(true)
@@ -131,8 +184,8 @@ fn main_window(
     gui.show(egui_ctx.ctx_mut(), |ui| {
         ui.style_mut()
             .override_font_id = Some(FontId::new(
-            16.0,
-            egui::FontFamily::Monospace
+            FONT_SIZE,
+            FONT
         ));
         ui.vertical_centered(|ui| {
             ui.heading("Tool for creating sprites");
@@ -150,14 +203,14 @@ fn main_window(
             if file_name.0 != "" {
                 println!("Creating: {}", file_name.0);
                 //let file = File::create(format!("{}.guspr", file_name.0));
-                file_name.1 = true;
+                *editor_step = EditorStep::FileCreated;
             }
         }
 
         if load.clicked() {
             if file_name.0 != "" {
                 println!("Loading: {}", file_name.0);
-                file_name.1 = true;
+                *editor_step = EditorStep::FileCreated;
                 todo!();
             }
         }

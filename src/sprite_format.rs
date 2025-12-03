@@ -1,25 +1,31 @@
+#![allow(unused_variables)]
+#![allow(unused_mut)]
+#![allow(dead_code)]
+
 use std::ops::Range;
 use bevy::prelude::Resource;
 use egui::TextBuffer;
 
 #[derive(Resource, Debug, Default)]
-pub struct Sprite {
+pub struct SpriteType {
     pub height: IntInput,
     pub width: IntInput,
     pub data: Option<Vec<SpriteFrame>>,
-    pub ind: u16,
+    pub ind: Option<u16>,
 }
 
 
 
-impl Sprite {
+impl SpriteType {
     pub fn add_frame(&mut self) {
         match self.data.as_mut() {
             None => {
                 self.data = Some(vec![SpriteFrame::default()]);
+                self.ind = Some(0);
             }
             Some(ok) => {
                 ok.push(SpriteFrame::default());
+                self.ind = Some((ok.len() - 1) as u16);
             }
         }
     }
@@ -34,7 +40,7 @@ impl Sprite {
             let count = frames.len() as u16;
 
             if ind < count {
-                self.ind = ind;
+                self.ind = Some(ind);
             }
         }
     }
