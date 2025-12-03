@@ -25,6 +25,13 @@ enum EditorStep {
     SettingsSet,
 }
 
+#[derive(States, Clone, Copy, Eq, PartialEq, Hash, Debug, Default)]
+enum EditorState {
+    #[default]
+    None,
+    Show,
+}
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -42,25 +49,50 @@ fn main() {
             }),
             ..default()
         }))
+        .insert_state(EditorState::None)
         .insert_resource(EditorStep::None)
         .insert_resource(SpriteType::default())
         .insert_resource(FileName("".to_owned()))
         .add_plugins(EguiPlugin)
         .add_systems(Update, (
                 main_window,
-                editor_window
+                settings_window,
+                editor_window.run_if(in_state(EditorState::Show))
+
             )
         )
         .run();
 }
 
 
+
 fn editor_window(
+    mut egui_ctx: EguiContexts,
+    mut sprite: ResMut<SpriteType>,
+) {
+    let gui = egui::Window::new("Editor")
+        .title_bar(true)
+        .resizable(true)
+        .movable(true)
+        .default_pos(Pos2::new(200.0, 0.0))
+        .frame(Frame {
+            fill: MENU_BG,
+            ..default()
+        });
+
+    gui.show(egui_ctx.ctx_mut(), |ui| {
+    });
+}
+
+
+fn settings_window(
     mut egui_ctx: EguiContexts,
     file_name: Res<FileName>,
     mut sprite: ResMut<SpriteType>,
     mut editor_step: ResMut<EditorStep>,
+    mut next: ResMut<NextState<EditorState>>,
 ) {
+    if *editor_step == EditorStep::None { return; }
     let gui = egui::Window::new("Sprite settings")
         .title_bar(true)
         .resizable(true)
@@ -77,13 +109,9 @@ fn editor_window(
             FONT_SIZE,
                 FONT,
         ));
-        if *editor_step == EditorStep::None {
-            ui.heading("Waiting for File creating/loading!");
-            return;
-        }
+
 
         if *editor_step == EditorStep::FileCreated {
-            ui.heading("Editor");
             ui.horizontal(|ui| {
                 ui.label("Width");
                 ui.text_edit_singleline(&mut sprite.width);
@@ -125,14 +153,14 @@ fn editor_window(
                 ui.label("Add frame");
                 let add = ui.button("+");
                 if add.clicked() {
+                    next.set(EditorState::Show);
                     sprite.add_frame();
                     let new_ind = sprite.ind.unwrap_or(0).clone().saturating_add(1);
                     sprite.move_ind(new_ind);
                 }
             });
-
             match sprite.ind {
-                None => { ui.label("No frames yet"); }
+                None => {ui.label("No frames yet"); }
                 Some(ok) => {
                     ui.label(format!("Index: {:?}", ok));
                     ui.horizontal(|ui| {
@@ -152,7 +180,8 @@ fn editor_window(
                         }
                     });
                 }
-            };
+            }
+
         }
 
         if apply_clicked {
@@ -172,8 +201,8 @@ fn main_window(
         return;
     }
 
-    let gui = egui::Window::new("Main")
-        .title_bar(true)
+    let gui = egui::Window::new("")
+        .title_bar(false)
         .resizable(true)
         .movable(true)
         .default_pos(Pos2::new(0.0, 0.0))
@@ -193,7 +222,7 @@ fn main_window(
             ui.hyperlink_to("Author", "https://github.com/MajGucek");
             ui.separator();
             ui.add(
-                egui::TextEdit::singleline(&mut file_name.0).hint_text("file name ...")
+                egui::TextEdit::singleline(&mut file_name.0).hint_text("name ...")
             )
         });
         let save = ui.button("Create");
