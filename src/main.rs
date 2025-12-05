@@ -5,6 +5,7 @@
 
 mod constants;
 mod sprite_format;
+mod input_string;
 
 use bevy::prelude::*;
 use bevy::render::RenderPlugin;
@@ -12,6 +13,7 @@ use bevy::render::settings::{Backends, WgpuSettings};
 use bevy_egui::*;
 use egui::{FontId, Frame, Pos2};
 use crate::constants::*;
+use crate::input_string::InputString;
 use crate::sprite_format::SpriteType;
 
 #[derive(Resource)]
@@ -32,6 +34,9 @@ enum EditorState {
     Show,
 }
 
+#[derive(Resource)]
+struct SpriteInput(InputString);
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -49,13 +54,14 @@ fn main() {
             }),
             ..default()
         }))
+        .insert_resource(SpriteInput(InputString::default()))
         .insert_state(EditorState::None)
         .insert_resource(EditorStep::None)
         .insert_resource(SpriteType::default())
         .insert_resource(FileName("".to_owned()))
         .add_plugins(EguiPlugin)
         .add_systems(Update, (
-                main_window,
+                main_window.run_if(in_state(EditorState::None)),
                 settings_window,
                 editor_window.run_if(in_state(EditorState::Show))
 
@@ -69,6 +75,7 @@ fn main() {
 fn editor_window(
     mut egui_ctx: EguiContexts,
     mut sprite: ResMut<SpriteType>,
+    mut sprite_input: ResMut<SpriteInput>,
 ) {
     let gui = egui::Window::new("Editor")
         .title_bar(true)
@@ -81,6 +88,12 @@ fn editor_window(
         });
 
     gui.show(egui_ctx.ctx_mut(), |ui| {
+        ui.add(
+            egui::TextEdit::singleline(&mut sprite_input.0)
+                .desired_rows(sprite.height.value as usize)
+                .desired_width((sprite.width.value * 20) as f32)
+        );
+        println!("{:?}", &sprite_input.0);
     });
 }
 
@@ -91,6 +104,7 @@ fn settings_window(
     mut sprite: ResMut<SpriteType>,
     mut editor_step: ResMut<EditorStep>,
     mut next: ResMut<NextState<EditorState>>,
+    mut sprite_input: ResMut<SpriteInput>,
 ) {
     if *editor_step == EditorStep::None { return; }
     let gui = egui::Window::new("Sprite settings")
@@ -186,6 +200,8 @@ fn settings_window(
 
         if apply_clicked {
             *editor_step = EditorStep::SettingsSet;
+            sprite_input.0.width = sprite.width.value.clone();
+            sprite_input.0.height = sprite.height.value.clone();
         }
     });
 }
