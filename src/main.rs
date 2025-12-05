@@ -5,19 +5,27 @@
 
 mod constants;
 mod sprite_format;
-mod input_string;
 
 use bevy::prelude::*;
 use bevy::render::RenderPlugin;
 use bevy::render::settings::{Backends, WgpuSettings};
 use bevy_egui::*;
-use egui::{FontId, Frame, Pos2};
+use egui::{Align, Color32, FontId, FontSelection, Frame, Margin, Pos2, Rounding, Stroke};
 use crate::constants::*;
-use crate::input_string::InputString;
 use crate::sprite_format::SpriteType;
 
 #[derive(Resource)]
 struct FileName(String);
+
+
+
+#[derive(Resource, Default)]
+struct InputField {
+    width: u16,
+    height: u16,
+    rows: Vec<String>,
+    focused_row: usize,
+}
 
 
 #[derive(Resource, Eq, PartialEq)]
@@ -34,8 +42,6 @@ enum EditorState {
     Show,
 }
 
-#[derive(Resource)]
-struct SpriteInput(InputString);
 
 fn main() {
     App::new()
@@ -54,7 +60,7 @@ fn main() {
             }),
             ..default()
         }))
-        .insert_resource(SpriteInput(InputString::default()))
+        .insert_resource(InputField::default())
         .insert_state(EditorState::None)
         .insert_resource(EditorStep::None)
         .insert_resource(SpriteType::default())
@@ -63,24 +69,40 @@ fn main() {
         .add_systems(Update, (
                 main_window.run_if(in_state(EditorState::None)),
                 settings_window,
-                editor_window.run_if(in_state(EditorState::Show))
-
+                editor_window.run_if(in_state(EditorState::Show)),
+                writer.run_if(in_state(EditorState::Show))
             )
         )
+        .add_systems(OnEnter(EditorState::Show), check_settings)
         .run();
 }
 
+fn check_settings(
+    sprite: ResMut<SpriteType>,
+    input_string: ResMut<InputField>,
+) {
+    if sprite.height.value != input_string.height || sprite.width.value != input_string.width {
+        panic!("WOW, shouldn't happen, de-sync error!");
+    }
+}
+
+fn writer(
+    mut sprite: ResMut<SpriteType>,
+    input_string: ResMut<InputField>,
+) {
+    todo!("Take String from input_string and write it to sprite!");
+}
 
 
 fn editor_window(
     mut egui_ctx: EguiContexts,
     mut sprite: ResMut<SpriteType>,
-    mut sprite_input: ResMut<SpriteInput>,
+    mut input_string: ResMut<InputField>,
 ) {
     let gui = egui::Window::new("Editor")
         .title_bar(true)
-        .resizable(true)
-        .movable(true)
+        .min_size(egui::vec2(300.0, 550.0))
+        .default_size(egui::vec2(400.0, 600.0))
         .default_pos(Pos2::new(200.0, 0.0))
         .frame(Frame {
             fill: MENU_BG,
@@ -88,12 +110,53 @@ fn editor_window(
         });
 
     gui.show(egui_ctx.ctx_mut(), |ui| {
-        ui.add(
-            egui::TextEdit::singleline(&mut sprite_input.0)
-                .desired_rows(sprite.height.value as usize)
-                .desired_width((sprite.width.value * 20) as f32)
-        );
-        println!("{:?}", &sprite_input.0);
+        Frame::default()
+            .fill(Color32::BLACK)
+            .stroke(Stroke::new(2.0, Color32::WHITE))
+            .rounding(Rounding::same(0.0))
+            .inner_margin(Margin::same(3.0))
+            .show(ui, |ui| {
+                ui.vertical(|ui| {
+                    let width = input_string.width.clone();
+                    for row in 0..input_string.height {
+                        //let id = ui.make_persistent_id(format!("row_{}", row));
+                        //let response =
+                            ui.scope(|ui| {
+                            ui.add(
+                                egui::TextEdit::singleline(&mut input_string.rows[row as usize])
+                                    //.id(id)
+                                    .frame(false)
+                                    .char_limit(width as usize)
+                                    .horizontal_align(Align::Center)
+                                    .desired_width(ui.available_width())
+                                    .font(FontSelection::from(FontId::new(FONT_SIZE * 2., FONT)))
+                            );
+                        })
+                                //.response
+                        ;
+
+                        /* This just doesn't work, maybe try GPT
+                        if response.has_focus() {
+                            input_string.focused_row = row;
+
+                            if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) && row > 0 {
+                                let id = ui.make_persistent_id(format!("row_{}", row - 1));
+                                ui.memory_mut(|m| m.request_focus(id));
+                                input_string.focused_row = row - 1;
+                            }
+
+                            if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::ArrowDown) || i.key_pressed(egui::Key::Enter)) && row  + 1 < input_string.height {
+                                let id = ui.make_persistent_id(format!("row_{}", row + 1));
+                                ui.memory_mut(|m| m.request_focus(id));
+                                input_string.focused_row = row + 1;
+                            }
+                        }
+                        */
+
+                    }
+                });
+            });
+
     });
 }
 
@@ -104,7 +167,7 @@ fn settings_window(
     mut sprite: ResMut<SpriteType>,
     mut editor_step: ResMut<EditorStep>,
     mut next: ResMut<NextState<EditorState>>,
-    mut sprite_input: ResMut<SpriteInput>,
+    mut input_string: ResMut<InputField>,
 ) {
     if *editor_step == EditorStep::None { return; }
     let gui = egui::Window::new("Sprite settings")
@@ -200,8 +263,9 @@ fn settings_window(
 
         if apply_clicked {
             *editor_step = EditorStep::SettingsSet;
-            sprite_input.0.width = sprite.width.value.clone();
-            sprite_input.0.height = sprite.height.value.clone();
+            input_string.width = sprite.width.value.clone();
+            input_string.height = sprite.height.value.clone();
+            input_string.rows = vec![String::new(); input_string.height as usize];
         }
     });
 }
