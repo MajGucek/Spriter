@@ -6,13 +6,15 @@
 mod constants;
 mod sprite_format;
 
+use std::time::Duration;
 use bevy::prelude::*;
 use bevy::render::RenderPlugin;
 use bevy::render::settings::{Backends, WgpuSettings};
+use bevy::time::common_conditions::on_timer;
 use bevy_egui::*;
 use egui::{Align, Color32, FontId, FontSelection, Frame, Margin, Pos2, Rounding, Stroke};
 use crate::constants::*;
-use crate::sprite_format::SpriteType;
+use crate::sprite_format::{Sprite, SpriteFrame, TerminalChar};
 
 #[derive(Resource)]
 struct FileName(String);
@@ -24,7 +26,6 @@ struct InputField {
     width: u16,
     height: u16,
     rows: Vec<String>,
-    focused_row: usize,
 }
 
 
@@ -63,40 +64,50 @@ fn main() {
         .insert_resource(InputField::default())
         .insert_state(EditorState::None)
         .insert_resource(EditorStep::None)
-        .insert_resource(SpriteType::default())
+        .insert_resource(Sprite::default())
         .insert_resource(FileName("".to_owned()))
         .add_plugins(EguiPlugin)
         .add_systems(Update, (
                 main_window.run_if(in_state(EditorState::None)),
                 settings_window,
                 editor_window.run_if(in_state(EditorState::Show)),
-                writer.run_if(in_state(EditorState::Show))
+                writer.run_if(in_state(EditorState::Show)).run_if(on_timer(Duration::from_secs_f32(1.0 / 1.0)))
             )
         )
         .add_systems(OnEnter(EditorState::Show), check_settings)
         .run();
 }
 
-fn check_settings(
-    sprite: ResMut<SpriteType>,
-    input_string: ResMut<InputField>,
-) {
-    if sprite.height.value != input_string.height || sprite.width.value != input_string.width {
-        panic!("WOW, shouldn't happen, de-sync error!");
-    }
-}
+
 
 fn writer(
-    mut sprite: ResMut<SpriteType>,
+    mut sprite: ResMut<Sprite>,
     input_string: ResMut<InputField>,
 ) {
-    todo!("Take String from input_string and write it to sprite!");
+    let ind = sprite.ind.unwrap().clone() as usize;
+    let empty_char = String::from(" ");
+
+    let mut sprite_frame = SpriteFrame::default();
+    for row in 0..input_string.rows.len() {
+        let mut hor: Vec<TerminalChar> = Vec::new();
+
+
+        for ch in input_string.rows.get(row).unwrap_or(&empty_char).chars() {
+            hor.push(TerminalChar::from_char(ch));
+        }
+
+        sprite_frame.frame.push(hor);
+    }
+
+    if let Some(el) = sprite.data.get_mut(ind) {
+        *el = sprite_frame;
+    }
 }
 
 
 fn editor_window(
     mut egui_ctx: EguiContexts,
-    mut sprite: ResMut<SpriteType>,
+    mut sprite: ResMut<Sprite>,
     mut input_string: ResMut<InputField>,
 ) {
     let gui = egui::Window::new("Editor")
@@ -127,7 +138,7 @@ fn editor_window(
                                     //.id(id)
                                     .frame(false)
                                     .char_limit(width as usize)
-                                    .horizontal_align(Align::Center)
+                                    .horizontal_align(Align::LEFT)
                                     .desired_width(ui.available_width())
                                     .font(FontSelection::from(FontId::new(FONT_SIZE * 2., FONT)))
                             );
@@ -164,7 +175,7 @@ fn editor_window(
 fn settings_window(
     mut egui_ctx: EguiContexts,
     file_name: Res<FileName>,
-    mut sprite: ResMut<SpriteType>,
+    mut sprite: ResMut<Sprite>,
     mut editor_step: ResMut<EditorStep>,
     mut next: ResMut<NextState<EditorState>>,
     mut input_string: ResMut<InputField>,
@@ -232,8 +243,9 @@ fn settings_window(
                 if add.clicked() {
                     next.set(EditorState::Show);
                     sprite.add_frame();
-                    let new_ind = sprite.ind.unwrap_or(0).clone().saturating_add(1);
-                    sprite.move_ind(new_ind);
+                    //let new_ind = sprite.ind.unwrap_or(0).clone().saturating_add(1);
+                    //sprite.move_ind(new_ind);
+                    trigger_reload(&mut input_string, sprite.ind.unwrap(), &mut sprite);
                 }
             });
             match sprite.ind {
@@ -248,12 +260,18 @@ fn settings_window(
 
                         if move_left.clicked() {
                             let new_ind = ok.saturating_sub(1).clone();
-                            sprite.move_ind(new_ind);
+                            match sprite.move_ind(new_ind) {
+                                Ok(_) => trigger_reload(&mut input_string, new_ind, &mut sprite),
+                                Err(e) => println!("Cannot move index: {:?}", e)
+                            }
                         }
 
                         if move_right.clicked() {
                             let new_ind = ok.saturating_add(1).clone();
-                            sprite.move_ind(new_ind);
+                            match sprite.move_ind(new_ind) {
+                                Ok(_) => trigger_reload(&mut input_string, new_ind, &mut sprite),
+                                Err(e) => println!("Cannot move index: {:?}", e)
+                            }
                         }
                     });
                 }
@@ -270,6 +288,39 @@ fn settings_window(
     });
 }
 
+
+
+fn trigger_reload(
+    input_field: &mut ResMut<InputField>,
+    ind: u16,
+    sprite: &mut ResMut<Sprite>,
+) {
+    println!("Loading frame with index: {:?}", ind);
+    println!("Loaded: {:?}", sprite.data);
+    let mut frame = &sprite.data.get(ind as usize).unwrap().frame;
+
+
+    let mut new_input_field = InputField::default();
+    new_input_field.height = sprite.height.value;
+    new_input_field.width = sprite.width.value;
+
+    if frame.is_empty() {
+        for row in 0..new_input_field.height {
+            new_input_field.rows.push(String::new());
+        }
+    } else {
+        for row in frame.iter() {
+            let mut str = String::new();
+            for ch in row.iter() {
+                str.push(ch.char as char)
+            }
+            new_input_field.rows.push(str);
+        }
+    }
+
+    **input_field = new_input_field;
+
+}
 
 
 fn main_window(
@@ -325,4 +376,14 @@ fn main_window(
         }
     });
 
+}
+
+
+fn check_settings(
+    sprite: ResMut<Sprite>,
+    input_string: ResMut<InputField>,
+) {
+    if sprite.height.value != input_string.height || sprite.width.value != input_string.width {
+        panic!("WOW, shouldn't happen, de-sync error!");
+    }
 }

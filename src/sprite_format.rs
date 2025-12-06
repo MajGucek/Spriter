@@ -7,47 +7,111 @@ use bevy::prelude::Resource;
 use egui::TextBuffer;
 
 #[derive(Resource, Debug, Default)]
-pub struct SpriteType {
+pub struct Sprite {
     pub height: IntInput,
     pub width: IntInput,
-    pub data: Option<Vec<SpriteFrame>>,
+    pub data: Vec<SpriteFrame>,
     pub ind: Option<u16>,
 }
 
 
 
-impl SpriteType {
+impl Sprite {
     pub fn add_frame(&mut self) {
-        match self.data.as_mut() {
-            None => {
-                self.data = Some(vec![SpriteFrame::default()]);
-                self.ind = Some(0);
-            }
-            Some(ok) => {
-                ok.push(SpriteFrame::default());
-                self.ind = Some((ok.len() - 1) as u16);
-            }
+        self.data.push(SpriteFrame::default());
+        match self.ind {
+            None => { self.ind = Some(0); }
+            Some(ok) => { self.ind = Some(ok + 1); }
         }
+        println!("Added frame");
     }
 
 
     pub fn get_frame_count(&self) -> usize {
-        self.data.as_ref().map(|v| v.len()).unwrap_or(0)
+        self.data.len()
     }
 
-    pub fn move_ind(&mut self, ind: u16) {
-        if let Some(ref frames) = self.data {
-            let count = frames.len() as u16;
+    pub fn move_ind(&mut self, ind: u16) -> Result<(), IndexMoveError> {
+        if ind < self.get_frame_count() as u16 {
+            self.ind = Some(ind);
+            Ok(())
+        } else {
+            println!("Failed to move ind to: {:?}", ind);
+            Err(IndexMoveError::IndexOutOfBounds(ind))
+        }
+    }
+}
 
-            if ind < count {
-                self.ind = Some(ind);
-            }
+#[derive(Debug)]
+pub enum IndexMoveError {
+    IndexOutOfBounds(u16),
+}
+
+
+#[derive(Default, Clone, Debug)]
+pub struct SpriteFrame {
+    pub frame: Vec<Vec<TerminalChar>>,
+}
+
+#[derive(Debug, Default, Copy, Clone)]
+pub struct TerminalChar {
+    pub char: u8,
+    //pub foreground: RGB,
+    //pub background: RGB,
+}
+
+impl TerminalChar {
+    fn convert_char(c: char) -> u8 {
+        if c.is_ascii() {
+            c as u8
+        } else {
+            b' '
         }
     }
 
-
-
+    pub fn from_char(ch: char) -> Self {
+        TerminalChar {
+            char: Self::convert_char(ch),
+            //foreground: RGB::white(),
+            //background: RGB::black(),
+        }
+    }
 }
+
+#[derive(Default, Copy, Clone, Debug)]
+pub struct RGB {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+}
+
+impl RGB {
+    pub fn white() -> Self {
+        RGB {
+            r: 255,
+            g: 255,
+            b: 255,
+        }
+    }
+    pub fn black() -> Self {
+        RGB {
+            r: 0,
+            g: 0,
+            b: 0,
+        }
+    }
+
+    pub fn grayscale(scale: u8) -> Self {
+        RGB {
+            r: scale,
+            g: scale,
+            b: scale,
+        }
+    }
+}
+
+
+
 
 
 #[derive(Debug, Default)]
@@ -97,24 +161,4 @@ impl TextBuffer for IntInput {
 
         self.value = self.formatted.parse::<u16>().unwrap_or(0);
     }
-}
-
-#[derive(Default, Clone, Debug)]
-pub struct SpriteFrame {
-    pub frame: Vec<Vec<TerminalChar>>,
-}
-
-
-#[derive(Default, Copy, Clone, Debug)]
-pub struct TerminalChar {
-    pub char: u8,
-    pub foreground: RGB,
-    pub background: RGB,
-}
-
-#[derive(Default, Copy, Clone, Debug)]
-pub struct RGB {
-    pub r: u8,
-    pub g: u8,
-    pub b: u8,
 }
