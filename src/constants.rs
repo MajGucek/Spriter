@@ -9,4 +9,4 @@ pub const FONT_COLOR: Color32 = Color32::from_rgb(255, 255, 255);
 pub const FONT: egui::FontFamily = egui::FontFamily::Monospace;
 pub const FONT_SIZE: f32 = 15.0;
 
-pub const FILE_EXT: &str = "guspr";
+pub const FILE_EXT: &str = "guspr.json";

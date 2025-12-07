@@ -18,28 +18,32 @@ pub struct Sprite {
 
 #[derive(Debug, Default)]
 pub struct SpriteFrames {
-    pub frames: Vec<SpriteFrame>
+    pub frames: Vec<Vec<Vec<TerminalChar>>>
 }
 
 
 impl fmt::Display for SpriteFrames {
 
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}",
-               format!("[{}]",
-                       self.frames.iter().map(|frame| {
-                           format!("{}", frame)
-                       }).collect::<Vec<_>>()
-                           .join(", ")
-               )
-        )
+        write!(f, "[{}]", self.frames.iter().map(|frame| {
+            format!("[{}]",
+                frame.iter().map(|row| {
+                    format!("[{}]",
+                        row.iter().map(|ch| {
+                            format!("{}", ch.char)
+                        }).collect::<Vec<_>>().join(", ")
+                    )
+                }).collect::<Vec<_>>().join(", ")
+            )
+        }).collect::<Vec<_>>().join(", "))
+
     }
 }
 
 
 impl Sprite {
     pub fn add_frame(&mut self) {
-        self.data.frames.push(SpriteFrame::default());
+        self.data.frames.push(Vec::new());
         match self.ind {
             None => { self.ind = Some(0); }
             Some(ok) => { self.ind = Some(ok + 1); }
@@ -67,28 +71,6 @@ pub enum IndexMoveError {
 }
 
 
-#[derive(Default, Clone, Debug)]
-pub struct SpriteFrame {
-    pub frame: Vec<Vec<TerminalChar>>,
-}
-
-impl fmt::Display for SpriteFrame {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}",
-               self.frame.iter().map(|row | {
-                   format!("[{}]",
-                           row.iter().map(|term_c| {
-                               term_c.char.to_string()
-                           }).collect::<Vec<String>>()
-                               .join(", ")
-                   )
-               }).collect::<Vec<String>>()
-                   .join(", ")
-        )
-    }
-}
-
-
 #[derive(Debug, Default, Copy, Clone)]
 pub struct TerminalChar {
     pub char: u8,
@@ -107,48 +89,15 @@ impl TerminalChar {
     pub fn from_char(ch: char) -> Self {
         TerminalChar {
             char: Self::convert_char(ch),
-            //foreground: RGB::white(),
-            //background: RGB::black(),
         }
     }
 }
 
-
-
-
-#[derive(Default, Copy, Clone, Debug)]
-pub struct RGB {
-    pub r: u8,
-    pub g: u8,
-    pub b: u8,
-}
-
-impl RGB {
-    pub fn white() -> Self {
-        RGB {
-            r: 255,
-            g: 255,
-            b: 255,
-        }
-    }
-    pub fn black() -> Self {
-        RGB {
-            r: 0,
-            g: 0,
-            b: 0,
-        }
-    }
-
-    pub fn grayscale(scale: u8) -> Self {
-        RGB {
-            r: scale,
-            g: scale,
-            b: scale,
-        }
+impl Into<String> for TerminalChar {
+    fn into(self) -> String {
+        String::from(self.char as char)
     }
 }
-
-
 
 
 

@@ -9,18 +9,19 @@
 mod constants;
 mod sprite_format;
 
-use std::fs;
-use std::io::Write;
+use std::{fs, io};
+use std::io::{Write};
 use std::time::Duration;
 use bevy::prelude::*;
+use bevy::reflect::List;
 use bevy::render::RenderPlugin;
 use bevy::render::settings::{Backends, WgpuSettings};
 use bevy::time::common_conditions::on_timer;
 use bevy_egui::*;
 use egui::{Align, Color32, FontId, FontSelection, Frame, Layout, Margin, Pos2, Rounding, Stroke};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use crate::constants::*;
-use crate::sprite_format::{Sprite, SpriteFrame, TerminalChar};
+use crate::sprite_format::{Sprite, TerminalChar};
 
 #[derive(Resource)]
 struct FileName {
@@ -32,14 +33,14 @@ struct FileName {
 enum ExportFormat {
     #[default]
     JSON,
-    BINARY,
 }
 
 #[derive(States, Clone, Eq, PartialEq, Hash, Debug, Default)]
-enum ExportState {
+enum FileState {
     #[default]
     None,
     Exporting,
+    Importing,
 }
 
 
@@ -67,6 +68,14 @@ enum EditorState {
 }
 
 
+#[derive(Serialize, Deserialize)]
+struct JsonFormat {
+    frame_count: u16,
+    width: u16,
+    height: u16,
+    sprite: String,
+}
+
 
 
 fn main() {
@@ -86,7 +95,7 @@ fn main() {
             }),
             ..default()
         }))
-        .insert_state(ExportState::None)
+        .insert_state(FileState::None)
         .insert_resource(InputField::default())
         .insert_state(EditorState::None)
         .insert_resource(EditorStep::None)
@@ -100,31 +109,106 @@ fn main() {
                 write_to_sprite.run_if(in_state(EditorState::Show)).run_if(on_timer(Duration::from_secs_f32(1.0 / 2.0)))
             )
         )
-        .add_systems(OnEnter(ExportState::Exporting), write_to_sprite)
-        .add_systems(OnEnter(ExportState::Exporting), export_sprite.after(write_to_sprite))
+        .add_systems(OnEnter(FileState::Exporting), write_to_sprite)
+        .add_systems(OnEnter(FileState::Exporting), export_sprite.after(write_to_sprite))
+        .add_systems(OnEnter(FileState::Importing), import_sprite)
         .add_systems(OnEnter(EditorState::Show), check_settings)
         .run();
 }
 
 
+fn import_sprite(
+    mut input_field: ResMut<InputField>,
+    mut sprite: ResMut<Sprite>,
+    file: Res<FileName>,
+    mut export_state: ResMut<NextState<FileState>>,
+    mut editor_state: ResMut<NextState<EditorState>>,
+    mut editor_step: ResMut<EditorStep>,
+) {
+    read_file(format!("{}.{}", file.name, FILE_EXT), &mut sprite).expect("Error");
+    input_field.height = sprite.height.value;
+    input_field.width = sprite.width.value;
+    input_field.rows = sprite.data.frames
+        .get(0usize).unwrap().iter()
+        .map(|row| {
+            row.iter()
+                .map(|ch| ch.char as char)
+                .collect::<String>()
+        })
+        .collect::<Vec<String>>();
+
+    sprite.move_ind(0u16).expect("Cannot move to index 0");
+
+    export_state.set(FileState::None);
+    editor_state.set(EditorState::Show);
+    *editor_step = EditorStep::SettingsSet;
+}
+fn read_file(file_path: String, sprite: &mut Sprite) -> io::Result<()> {
+    let file = fs::File::open(file_path)?;
+    let json: serde_json::Value = serde_json::from_reader(file)?;
+    sprite.height.value = match json.get("height") {
+        Some(ok) => u16::try_from(ok.as_u64().unwrap_or(0u64)).unwrap_or(0),
+        None => return Err(io::Error::new(io::ErrorKind::InvalidData, "Missing Field height!"))
+    };
+
+    sprite.width.value = match json.get("width") {
+        Some(ok) => u16::try_from(ok.as_u64().unwrap_or(0u64)).unwrap_or(0),
+        None => return Err(io::Error::new(io::ErrorKind::InvalidData, "Missing Field width!"))
+    };
+
+    let frame_count = match json.get("frame_count") {
+        Some(ok) => u16::try_from(ok.as_u64().unwrap_or(0u64)).unwrap_or(0),
+        None => return Err(io::Error::new(io::ErrorKind::InvalidData, "Missing Field frame_count!"))
+    };
+
+    let encoded_sprite = match json.get("sprite") {
+        Some(ok) => String::try_from(ok.as_str().unwrap_or("")).unwrap_or(String::new()),
+        None => return Err(io::Error::new(io::ErrorKind::InvalidData, "Missing Field sprite!"))
+    };
+
+    let data = serde_json::from_str::<Vec<Vec<Vec<u8>>>>(encoded_sprite.trim_matches('"'))?;
+
+    sprite.data.frames = data
+        .into_iter()
+        .map(|frame| {
+            frame
+                .into_iter()
+                .map(|row| {
+                    row.into_iter()
+                        .map(|ascii| TerminalChar::from_char(ascii as char))
+                        .collect()
+                })
+                .collect()
+        })
+        .collect();
+
+    sprite.ind = Some(0);
+    Ok(())
+}
+
+
+fn is_json_array(string: &str) -> bool {
+    string.starts_with("[") && string.ends_with("]")
+}
+
 
 fn write_to_sprite(
     mut sprite: ResMut<Sprite>,
-    input_field: ResMut<InputField>,
+    input_field: Res<InputField>,
 ) {
     let ind = sprite.ind.unwrap().clone() as usize;
     let empty_char = String::from(" ");
 
-    let mut sprite_frame = SpriteFrame::default();
+    let mut sprite_frame = Vec::new();
     for row in 0..input_field.rows.len() {
         let mut hor: Vec<TerminalChar> = Vec::new();
 
 
-        for ch in input_field.rows.get(row).unwrap_or(&empty_char).chars() {
+        for ch in input_field.rows.get(row).unwrap_or(&empty_char).downcast_ref::<String>().unwrap().chars() {
             hor.push(TerminalChar::from_char(ch));
         }
 
-        sprite_frame.frame.push(hor);
+        sprite_frame.push(hor);
     }
 
     if let Some(el) = sprite.data.frames.get_mut(ind) {
@@ -135,7 +219,6 @@ fn write_to_sprite(
 
 fn editor_window(
     mut egui_ctx: EguiContexts,
-    mut sprite: ResMut<Sprite>,
     mut input_field: ResMut<InputField>,
 ) {
     let gui = egui::Window::new("Editor")
@@ -182,7 +265,7 @@ fn settings_window(
     mut editor_step: ResMut<EditorStep>,
     mut next: ResMut<NextState<EditorState>>,
     mut input_field: ResMut<InputField>,
-    mut export_state: ResMut<NextState<ExportState>>,
+    mut export_state: ResMut<NextState<FileState>>,
 ) {
     if *editor_step == EditorStep::None { return; }
     let gui = egui::Window::new("Sprite settings")
@@ -285,7 +368,7 @@ fn settings_window(
                     let export = ui.button("Export");
 
                     if export.clicked() {
-                        export_state.set(ExportState::Exporting);
+                        export_state.set(FileState::Exporting);
                     }
                 }
             }
@@ -305,16 +388,13 @@ fn settings_window(
 fn export_sprite(
     sprite: Res<Sprite>,
     file: Res<FileName>,
-    mut export_state: ResMut<NextState<ExportState>>,
+    mut export_state: ResMut<NextState<FileState>>,
 ) {
     println!("Exporting: {}.{} in format: {:?}", file.name, FILE_EXT, file.format);
     let file_name = format!("{}.{}", file.name, FILE_EXT);
 
     #[allow(unreachable_patterns)]
     match file.format {
-        ExportFormat::BINARY => {
-
-        },
         ExportFormat::JSON => {
             match export_json(&file_name, sprite.as_ref()) {
                 Ok(_) => { println!("JSON Export successful!"); },
@@ -324,19 +404,13 @@ fn export_sprite(
         _ => {todo!("Implement this export format: {:?}", file.format);}
     }
 
-    export_state.set(ExportState::None);
+    export_state.set(FileState::None);
 }
 
-#[derive(Serialize)]
-struct JsonExportFormat {
-    frame_count: u16,
-    width: u16,
-    height: u16,
-    sprite: String,
-}
-fn export_json(file_name: &str, sprite: &Sprite) -> std::io::Result<()> {
-    let file_name = format!("{}.json", file_name);
-    let serialized = JsonExportFormat {
+
+fn export_json(file_name: &str, sprite: &Sprite) -> io::Result<()> {
+    let file_name = format!("{}", file_name);
+    let serialized = JsonFormat {
         frame_count: sprite.data.frames.len() as u16,
         width: sprite.width.value,
         height: sprite.height.value,
@@ -357,7 +431,7 @@ fn trigger_reload(
     ind: u16,
     sprite: &mut ResMut<Sprite>,
 ) {
-    let mut frame = &sprite.data.frames.get(ind as usize).unwrap().frame;
+    let mut frame = &sprite.data.frames.get(ind as usize).unwrap();
 
 
     let mut new_input_field = InputField::default();
@@ -387,6 +461,7 @@ fn main_window(
     mut egui_ctx: EguiContexts,
     mut file_name: ResMut<FileName>,
     mut editor_step: ResMut<EditorStep>,
+    mut export_state: ResMut<NextState<FileState>>,
 ) {
     if *editor_step != EditorStep::None {
         return;
@@ -420,7 +495,7 @@ fn main_window(
         ui.with_layout(Layout::top_down(Align::Center), |ui| {
             ui.horizontal(|ui| {
                 let save = ui.button("Create");
-                //let load = ui.button("Load");
+                let load = ui.button("Load");
 
 
                 if save.clicked() {
@@ -430,16 +505,13 @@ fn main_window(
                     }
                 }
 
-                /*
                 if load.clicked() {
                     if file_name.name != "" {
-                        println!("Loading: {}", file_name.name);
+                        println!("Loading: {}.{}", file_name.name, FILE_EXT);
                         *editor_step = EditorStep::FileCreated;
-                        todo!("Implement loading");
+                        export_state.set(FileState::Importing);
                     }
                 }
-
-                 */
             });
         });
 
@@ -451,8 +523,8 @@ fn main_window(
 
 
 fn check_settings(
-    sprite: ResMut<Sprite>,
-    input_field: ResMut<InputField>,
+    sprite: Res<Sprite>,
+    input_field: Res<InputField>,
 ) {
     if sprite.height.value != input_field.height || sprite.width.value != input_field.width {
         panic!("WOW, shouldn't happen, de-sync error!");
