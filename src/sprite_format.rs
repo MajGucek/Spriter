@@ -1,7 +1,3 @@
-#![allow(unused_variables)]
-#![allow(unused_mut)]
-#![allow(dead_code)]
-
 use std::fmt;
 use std::fmt::Formatter;
 use std::ops::Range;

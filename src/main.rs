@@ -1,11 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 
-#![allow(unused_variables)]
-#![allow(unused_mut)]
-#![allow(dead_code)]
-
-
 mod constants;
 mod sprite_format;
 
@@ -156,11 +151,6 @@ fn read_file(file_path: String, sprite: &mut Sprite) -> io::Result<()> {
         None => return Err(io::Error::new(io::ErrorKind::InvalidData, "Missing Field width!"))
     };
 
-    let frame_count = match json.get("frame_count") {
-        Some(ok) => u16::try_from(ok.as_u64().unwrap_or(0u64)).unwrap_or(0),
-        None => return Err(io::Error::new(io::ErrorKind::InvalidData, "Missing Field frame_count!"))
-    };
-
     let encoded_sprite = match json.get("sprite") {
         Some(ok) => String::try_from(ok.as_str().unwrap_or("")).unwrap_or(String::new()),
         None => return Err(io::Error::new(io::ErrorKind::InvalidData, "Missing Field sprite!"))
@@ -186,10 +176,6 @@ fn read_file(file_path: String, sprite: &mut Sprite) -> io::Result<()> {
     Ok(())
 }
 
-
-fn is_json_array(string: &str) -> bool {
-    string.starts_with("[") && string.ends_with("]")
-}
 
 
 fn write_to_sprite(
@@ -431,7 +417,7 @@ fn trigger_reload(
     ind: u16,
     sprite: &mut ResMut<Sprite>,
 ) {
-    let mut frame = &sprite.data.frames.get(ind as usize).unwrap();
+    let frame = &sprite.data.frames.get(ind as usize).unwrap();
 
 
     let mut new_input_field = InputField::default();
@@ -439,7 +425,7 @@ fn trigger_reload(
     new_input_field.width = sprite.width.value;
 
     if frame.is_empty() {
-        for row in 0..new_input_field.height {
+        for _ in 0..new_input_field.height {
             new_input_field.rows.push(String::new());
         }
     } else {
