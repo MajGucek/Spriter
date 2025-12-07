@@ -2,6 +2,8 @@
 #![allow(unused_mut)]
 #![allow(dead_code)]
 
+use std::fmt;
+use std::fmt::Formatter;
 use std::ops::Range;
 use bevy::prelude::Resource;
 use egui::TextBuffer;
@@ -10,25 +12,43 @@ use egui::TextBuffer;
 pub struct Sprite {
     pub height: IntInput,
     pub width: IntInput,
-    pub data: Vec<SpriteFrame>,
+    pub data: SpriteFrames,
     pub ind: Option<u16>,
 }
 
+#[derive(Debug, Default)]
+pub struct SpriteFrames {
+    pub frames: Vec<SpriteFrame>
+}
+
+
+impl fmt::Display for SpriteFrames {
+
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}",
+               format!("[{}]",
+                       self.frames.iter().map(|frame| {
+                           format!("{}", frame)
+                       }).collect::<Vec<_>>()
+                           .join(", ")
+               )
+        )
+    }
+}
 
 
 impl Sprite {
     pub fn add_frame(&mut self) {
-        self.data.push(SpriteFrame::default());
+        self.data.frames.push(SpriteFrame::default());
         match self.ind {
             None => { self.ind = Some(0); }
             Some(ok) => { self.ind = Some(ok + 1); }
         }
-        println!("Added frame");
     }
 
 
     pub fn get_frame_count(&self) -> usize {
-        self.data.len()
+        self.data.frames.len()
     }
 
     pub fn move_ind(&mut self, ind: u16) -> Result<(), IndexMoveError> {
@@ -36,7 +56,6 @@ impl Sprite {
             self.ind = Some(ind);
             Ok(())
         } else {
-            println!("Failed to move ind to: {:?}", ind);
             Err(IndexMoveError::IndexOutOfBounds(ind))
         }
     }
@@ -53,12 +72,28 @@ pub struct SpriteFrame {
     pub frame: Vec<Vec<TerminalChar>>,
 }
 
+impl fmt::Display for SpriteFrame {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}",
+               self.frame.iter().map(|row | {
+                   format!("[{}]",
+                           row.iter().map(|term_c| {
+                               term_c.char.to_string()
+                           }).collect::<Vec<String>>()
+                               .join(", ")
+                   )
+               }).collect::<Vec<String>>()
+                   .join(", ")
+        )
+    }
+}
+
+
 #[derive(Debug, Default, Copy, Clone)]
 pub struct TerminalChar {
     pub char: u8,
-    //pub foreground: RGB,
-    //pub background: RGB,
 }
+
 
 impl TerminalChar {
     fn convert_char(c: char) -> u8 {
@@ -77,6 +112,9 @@ impl TerminalChar {
         }
     }
 }
+
+
+
 
 #[derive(Default, Copy, Clone, Debug)]
 pub struct RGB {

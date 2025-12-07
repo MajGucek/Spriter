@@ -1,3 +1,6 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+
 #![allow(unused_variables)]
 #![allow(unused_mut)]
 #![allow(dead_code)]
@@ -6,18 +9,38 @@
 mod constants;
 mod sprite_format;
 
+use std::fs;
+use std::io::Write;
 use std::time::Duration;
 use bevy::prelude::*;
 use bevy::render::RenderPlugin;
 use bevy::render::settings::{Backends, WgpuSettings};
 use bevy::time::common_conditions::on_timer;
 use bevy_egui::*;
-use egui::{Align, Color32, FontId, FontSelection, Frame, Margin, Pos2, Rounding, Stroke};
+use egui::{Align, Color32, FontId, FontSelection, Frame, Layout, Margin, Pos2, Rounding, Stroke};
+use serde::Serialize;
 use crate::constants::*;
 use crate::sprite_format::{Sprite, SpriteFrame, TerminalChar};
 
 #[derive(Resource)]
-struct FileName(String);
+struct FileName {
+    name: String,
+    format: ExportFormat,
+}
+
+#[derive(Default, Debug)]
+enum ExportFormat {
+    #[default]
+    JSON,
+    BINARY,
+}
+
+#[derive(States, Clone, Eq, PartialEq, Hash, Debug, Default)]
+enum ExportState {
+    #[default]
+    None,
+    Exporting,
+}
 
 
 
@@ -44,6 +67,8 @@ enum EditorState {
 }
 
 
+
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -61,45 +86,48 @@ fn main() {
             }),
             ..default()
         }))
+        .insert_state(ExportState::None)
         .insert_resource(InputField::default())
         .insert_state(EditorState::None)
         .insert_resource(EditorStep::None)
         .insert_resource(Sprite::default())
-        .insert_resource(FileName("".to_owned()))
+        .insert_resource(FileName {name: "".to_owned(), format: default()})
         .add_plugins(EguiPlugin)
         .add_systems(Update, (
                 main_window.run_if(in_state(EditorState::None)),
                 settings_window,
                 editor_window.run_if(in_state(EditorState::Show)),
-                writer.run_if(in_state(EditorState::Show)).run_if(on_timer(Duration::from_secs_f32(1.0 / 1.0)))
+                write_to_sprite.run_if(in_state(EditorState::Show)).run_if(on_timer(Duration::from_secs_f32(1.0 / 2.0)))
             )
         )
+        .add_systems(OnEnter(ExportState::Exporting), write_to_sprite)
+        .add_systems(OnEnter(ExportState::Exporting), export_sprite.after(write_to_sprite))
         .add_systems(OnEnter(EditorState::Show), check_settings)
         .run();
 }
 
 
 
-fn writer(
+fn write_to_sprite(
     mut sprite: ResMut<Sprite>,
-    input_string: ResMut<InputField>,
+    input_field: ResMut<InputField>,
 ) {
     let ind = sprite.ind.unwrap().clone() as usize;
     let empty_char = String::from(" ");
 
     let mut sprite_frame = SpriteFrame::default();
-    for row in 0..input_string.rows.len() {
+    for row in 0..input_field.rows.len() {
         let mut hor: Vec<TerminalChar> = Vec::new();
 
 
-        for ch in input_string.rows.get(row).unwrap_or(&empty_char).chars() {
+        for ch in input_field.rows.get(row).unwrap_or(&empty_char).chars() {
             hor.push(TerminalChar::from_char(ch));
         }
 
         sprite_frame.frame.push(hor);
     }
 
-    if let Some(el) = sprite.data.get_mut(ind) {
+    if let Some(el) = sprite.data.frames.get_mut(ind) {
         *el = sprite_frame;
     }
 }
@@ -108,7 +136,7 @@ fn writer(
 fn editor_window(
     mut egui_ctx: EguiContexts,
     mut sprite: ResMut<Sprite>,
-    mut input_string: ResMut<InputField>,
+    mut input_field: ResMut<InputField>,
 ) {
     let gui = egui::Window::new("Editor")
         .title_bar(true)
@@ -128,42 +156,17 @@ fn editor_window(
             .inner_margin(Margin::same(3.0))
             .show(ui, |ui| {
                 ui.vertical(|ui| {
-                    let width = input_string.width.clone();
-                    for row in 0..input_string.height {
-                        //let id = ui.make_persistent_id(format!("row_{}", row));
-                        //let response =
-                            ui.scope(|ui| {
-                            ui.add(
-                                egui::TextEdit::singleline(&mut input_string.rows[row as usize])
-                                    //.id(id)
-                                    .frame(false)
-                                    .char_limit(width as usize)
-                                    .horizontal_align(Align::LEFT)
-                                    .desired_width(ui.available_width())
-                                    .font(FontSelection::from(FontId::new(FONT_SIZE * 2., FONT)))
-                            );
-                        })
-                                //.response
-                        ;
-
-                        /* This just doesn't work, maybe try GPT
-                        if response.has_focus() {
-                            input_string.focused_row = row;
-
-                            if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) && row > 0 {
-                                let id = ui.make_persistent_id(format!("row_{}", row - 1));
-                                ui.memory_mut(|m| m.request_focus(id));
-                                input_string.focused_row = row - 1;
-                            }
-
-                            if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::ArrowDown) || i.key_pressed(egui::Key::Enter)) && row  + 1 < input_string.height {
-                                let id = ui.make_persistent_id(format!("row_{}", row + 1));
-                                ui.memory_mut(|m| m.request_focus(id));
-                                input_string.focused_row = row + 1;
-                            }
-                        }
-                        */
-
+                    let width = input_field.width.clone();
+                    for row in 0..input_field.height {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut input_field.rows[row as usize])
+                                //.id(id)
+                                .frame(false)
+                                .char_limit(width as usize)
+                                .horizontal_align(Align::LEFT)
+                                .desired_width(ui.available_width())
+                                .font(FontSelection::from(FontId::new(FONT_SIZE * 2., FONT)))
+                        );
                     }
                 });
             });
@@ -174,11 +177,12 @@ fn editor_window(
 
 fn settings_window(
     mut egui_ctx: EguiContexts,
-    file_name: Res<FileName>,
+    file: Res<FileName>,
     mut sprite: ResMut<Sprite>,
     mut editor_step: ResMut<EditorStep>,
     mut next: ResMut<NextState<EditorState>>,
-    mut input_string: ResMut<InputField>,
+    mut input_field: ResMut<InputField>,
+    mut export_state: ResMut<NextState<ExportState>>,
 ) {
     if *editor_step == EditorStep::None { return; }
     let gui = egui::Window::new("Sprite settings")
@@ -232,7 +236,7 @@ fn settings_window(
 
         if *editor_step == EditorStep::SettingsSet {
             ui.label(
-                egui::RichText::new(format!("{}.guspr", file_name.0))
+                egui::RichText::new(format!("{}.{}", file.name, FILE_EXT))
                     .size(FONT_SIZE * 1.5)
                     .heading()
             );
@@ -243,9 +247,7 @@ fn settings_window(
                 if add.clicked() {
                     next.set(EditorState::Show);
                     sprite.add_frame();
-                    //let new_ind = sprite.ind.unwrap_or(0).clone().saturating_add(1);
-                    //sprite.move_ind(new_ind);
-                    trigger_reload(&mut input_string, sprite.ind.unwrap(), &mut sprite);
+                    trigger_reload(&mut input_field, sprite.ind.unwrap(), &mut sprite);
                 }
             });
             match sprite.ind {
@@ -261,19 +263,30 @@ fn settings_window(
                         if move_left.clicked() {
                             let new_ind = ok.saturating_sub(1).clone();
                             match sprite.move_ind(new_ind) {
-                                Ok(_) => trigger_reload(&mut input_string, new_ind, &mut sprite),
-                                Err(e) => println!("Cannot move index: {:?}", e)
+                                Ok(_) => trigger_reload(&mut input_field, new_ind, &mut sprite),
+                                Err(_) => {
+                                    //println!("Cannot move index");
+                                }
                             }
                         }
 
                         if move_right.clicked() {
                             let new_ind = ok.saturating_add(1).clone();
                             match sprite.move_ind(new_ind) {
-                                Ok(_) => trigger_reload(&mut input_string, new_ind, &mut sprite),
-                                Err(e) => println!("Cannot move index: {:?}", e)
+                                Ok(_) => trigger_reload(&mut input_field, new_ind, &mut sprite),
+                                Err(_) => {
+                                    //println!("Cannot move index");
+                                }
                             }
                         }
                     });
+
+
+                    let export = ui.button("Export");
+
+                    if export.clicked() {
+                        export_state.set(ExportState::Exporting);
+                    }
                 }
             }
 
@@ -281,11 +294,60 @@ fn settings_window(
 
         if apply_clicked {
             *editor_step = EditorStep::SettingsSet;
-            input_string.width = sprite.width.value.clone();
-            input_string.height = sprite.height.value.clone();
-            input_string.rows = vec![String::new(); input_string.height as usize];
+            input_field.width = sprite.width.value.clone();
+            input_field.height = sprite.height.value.clone();
+            input_field.rows = vec![String::new(); input_field.height as usize];
         }
     });
+}
+
+
+fn export_sprite(
+    sprite: Res<Sprite>,
+    file: Res<FileName>,
+    mut export_state: ResMut<NextState<ExportState>>,
+) {
+    println!("Exporting: {}.{} in format: {:?}", file.name, FILE_EXT, file.format);
+    let file_name = format!("{}.{}", file.name, FILE_EXT);
+
+    #[allow(unreachable_patterns)]
+    match file.format {
+        ExportFormat::BINARY => {
+
+        },
+        ExportFormat::JSON => {
+            match export_json(&file_name, sprite.as_ref()) {
+                Ok(_) => { println!("JSON Export successful!"); },
+                Err(e) => { println!("JSON Export error: {:?}", e); }
+            }
+        },
+        _ => {todo!("Implement this export format: {:?}", file.format);}
+    }
+
+    export_state.set(ExportState::None);
+}
+
+#[derive(Serialize)]
+struct JsonExportFormat {
+    frame_count: u16,
+    width: u16,
+    height: u16,
+    sprite: String,
+}
+fn export_json(file_name: &str, sprite: &Sprite) -> std::io::Result<()> {
+    let file_name = format!("{}.json", file_name);
+    let serialized = JsonExportFormat {
+        frame_count: sprite.data.frames.len() as u16,
+        width: sprite.width.value,
+        height: sprite.height.value,
+        sprite: format!("{}", sprite.data),
+    };
+
+    let mut file = fs::File::create(file_name)?;
+    serde_json::to_writer_pretty(&mut file, &serialized)?;
+    file.flush()?;
+
+    Ok(())
 }
 
 
@@ -295,9 +357,7 @@ fn trigger_reload(
     ind: u16,
     sprite: &mut ResMut<Sprite>,
 ) {
-    println!("Loading frame with index: {:?}", ind);
-    println!("Loaded: {:?}", sprite.data);
-    let mut frame = &sprite.data.get(ind as usize).unwrap().frame;
+    let mut frame = &sprite.data.frames.get(ind as usize).unwrap().frame;
 
 
     let mut new_input_field = InputField::default();
@@ -332,11 +392,10 @@ fn main_window(
         return;
     }
 
-    let gui = egui::Window::new("")
-        .title_bar(false)
+    let gui = egui::Window::new("Main")
         .resizable(true)
         .movable(true)
-        .default_pos(Pos2::new(0.0, 0.0))
+        .default_pos(Pos2::new(5.0, 5.0))
         .frame(Frame {
             fill: MENU_BG,
             ..default()
@@ -353,27 +412,39 @@ fn main_window(
             ui.hyperlink_to("Author", "https://github.com/MajGucek");
             ui.separator();
             ui.add(
-                egui::TextEdit::singleline(&mut file_name.0).hint_text("name ...")
+                egui::TextEdit::singleline(&mut file_name.name).hint_text("name ...")
             )
         });
-        let save = ui.button("Create");
-        let load = ui.button("Load");
 
-        if save.clicked() {
-            if file_name.0 != "" {
-                println!("Creating: {}", file_name.0);
-                //let file = File::create(format!("{}.guspr", file_name.0));
-                *editor_step = EditorStep::FileCreated;
-            }
-        }
 
-        if load.clicked() {
-            if file_name.0 != "" {
-                println!("Loading: {}", file_name.0);
-                *editor_step = EditorStep::FileCreated;
-                todo!();
-            }
-        }
+        ui.with_layout(Layout::top_down(Align::Center), |ui| {
+            ui.horizontal(|ui| {
+                let save = ui.button("Create");
+                //let load = ui.button("Load");
+
+
+                if save.clicked() {
+                    if file_name.name != "" {
+                        println!("Creating: {}.{}", file_name.name, FILE_EXT);
+                        *editor_step = EditorStep::FileCreated;
+                    }
+                }
+
+                /*
+                if load.clicked() {
+                    if file_name.name != "" {
+                        println!("Loading: {}", file_name.name);
+                        *editor_step = EditorStep::FileCreated;
+                        todo!("Implement loading");
+                    }
+                }
+
+                 */
+            });
+        });
+
+
+
     });
 
 }
@@ -381,9 +452,9 @@ fn main_window(
 
 fn check_settings(
     sprite: ResMut<Sprite>,
-    input_string: ResMut<InputField>,
+    input_field: ResMut<InputField>,
 ) {
-    if sprite.height.value != input_string.height || sprite.width.value != input_string.width {
+    if sprite.height.value != input_field.height || sprite.width.value != input_field.width {
         panic!("WOW, shouldn't happen, de-sync error!");
     }
 }
