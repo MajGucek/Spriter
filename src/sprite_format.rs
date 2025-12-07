@@ -56,14 +56,14 @@ impl Sprite {
             self.ind = Some(ind);
             Ok(())
         } else {
-            Err(IndexMoveError::IndexOutOfBounds(ind))
+            Err(IndexMoveError::IndexOutOfBounds)
         }
     }
 }
 
 #[derive(Debug)]
 pub enum IndexMoveError {
-    IndexOutOfBounds(u16),
+    IndexOutOfBounds,
 }
 
 
@@ -101,12 +101,6 @@ impl Into<String> for TerminalChar {
 pub struct IntInput {
     pub value: u16,
     formatted: String,
-}
-impl IntInput {
-    pub fn assign(&mut self, b: u16) {
-        self.value = b;
-        self.formatted = b.to_string();
-    }
 }
 
 impl TextBuffer for IntInput {
