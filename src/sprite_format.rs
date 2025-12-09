@@ -1,5 +1,3 @@
-use std::fmt;
-use std::fmt::Formatter;
 use std::ops::Range;
 use bevy::prelude::Resource;
 use egui::TextBuffer;
@@ -14,26 +12,7 @@ pub struct Sprite {
 
 #[derive(Debug, Default)]
 pub struct SpriteFrames {
-    pub frames: Vec<Vec<Vec<TerminalChar>>>
-}
-
-
-impl fmt::Display for SpriteFrames {
-
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "[{}]", self.frames.iter().map(|frame| {
-            format!("[{}]",
-                frame.iter().map(|row| {
-                    format!("[{}]",
-                        row.iter().map(|ch| {
-                            format!("{}", ch.char)
-                        }).collect::<Vec<_>>().join(", ")
-                    )
-                }).collect::<Vec<_>>().join(", ")
-            )
-        }).collect::<Vec<_>>().join(", "))
-
-    }
+    pub frames: Vec<Vec<Vec<u8>>>
 }
 
 
@@ -64,35 +43,6 @@ impl Sprite {
 #[derive(Debug)]
 pub enum IndexMoveError {
     IndexOutOfBounds,
-}
-
-
-#[derive(Debug, Default, Copy, Clone)]
-pub struct TerminalChar {
-    pub char: u8,
-}
-
-
-impl TerminalChar {
-    fn convert_char(c: char) -> u8 {
-        if c.is_ascii() {
-            c as u8
-        } else {
-            b' '
-        }
-    }
-
-    pub fn from_char(ch: char) -> Self {
-        TerminalChar {
-            char: Self::convert_char(ch),
-        }
-    }
-}
-
-impl Into<String> for TerminalChar {
-    fn into(self) -> String {
-        String::from(self.char as char)
-    }
 }
 
 

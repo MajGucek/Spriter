@@ -5,7 +5,7 @@ mod constants;
 mod sprite_format;
 
 use std::{fs, io};
-use std::io::{Write};
+use std::io::Write;
 use std::time::Duration;
 use bevy::prelude::*;
 use bevy::reflect::List;
@@ -16,7 +16,7 @@ use bevy_egui::*;
 use egui::{Align, Color32, FontId, FontSelection, Frame, Layout, Margin, Pos2, Rounding, Stroke};
 use serde::{Deserialize, Serialize};
 use crate::constants::*;
-use crate::sprite_format::{Sprite, TerminalChar};
+use crate::sprite_format::Sprite;
 
 #[derive(Resource)]
 struct FileName {
@@ -68,7 +68,7 @@ struct JsonFormat {
     frame_count: u16,
     width: u16,
     height: u16,
-    sprite: String,
+    sprite: Vec<Vec<Vec<u8>>>,
 }
 
 
@@ -123,14 +123,13 @@ fn import_sprite(
     read_file(format!("{}.{}", file.name, FILE_EXT), &mut sprite).expect("Error");
     input_field.height = sprite.height.value;
     input_field.width = sprite.width.value;
-    input_field.rows = sprite.data.frames
-        .get(0usize).unwrap().iter()
-        .map(|row| {
-            row.iter()
-                .map(|ch| ch.char as char)
-                .collect::<String>()
-        })
-        .collect::<Vec<String>>();
+    // Convert Sprite: Vec<Vec<Vec<u8>>>[0] to Vec<String>
+    input_field.rows = sprite.data.frames.get(0usize).unwrap().downcast_ref::<Vec<Vec<u8>>>().unwrap()
+        .iter().map(|row| {
+            row.downcast_ref::<Vec<u8>>().unwrap().iter().map(|ch| {
+                ch.downcast_ref::<u8>().unwrap().clone() as char
+            }).collect::<Vec<char>>().into_iter().collect()
+        }).collect::<Vec<String>>();
 
     sprite.move_ind(0u16).expect("Cannot move to index 0");
 
@@ -140,40 +139,15 @@ fn import_sprite(
 }
 fn read_file(file_path: String, sprite: &mut Sprite) -> io::Result<()> {
     let file = fs::File::open(file_path)?;
-    let json: serde_json::Value = serde_json::from_reader(file)?;
-    sprite.height.value = match json.get("height") {
-        Some(ok) => u16::try_from(ok.as_u64().unwrap_or(0u64)).unwrap_or(0),
-        None => return Err(io::Error::new(io::ErrorKind::InvalidData, "Missing Field height!"))
-    };
+    let json: JsonFormat = serde_json::from_reader(file)?;
 
-    sprite.width.value = match json.get("width") {
-        Some(ok) => u16::try_from(ok.as_u64().unwrap_or(0u64)).unwrap_or(0),
-        None => return Err(io::Error::new(io::ErrorKind::InvalidData, "Missing Field width!"))
-    };
-
-    let encoded_sprite = match json.get("sprite") {
-        Some(ok) => String::try_from(ok.as_str().unwrap_or("")).unwrap_or(String::new()),
-        None => return Err(io::Error::new(io::ErrorKind::InvalidData, "Missing Field sprite!"))
-    };
-
-    let data = serde_json::from_str::<Vec<Vec<Vec<u8>>>>(encoded_sprite.trim_matches('"'))?;
-
-    sprite.data.frames = data
-        .into_iter()
-        .map(|frame| {
-            frame
-                .into_iter()
-                .map(|row| {
-                    row.into_iter()
-                        .map(|ascii| TerminalChar::from_char(ascii as char))
-                        .collect()
-                })
-                .collect()
-        })
-        .collect();
-
+    sprite.height.value = json.height;
+    sprite.width.value = json.width;
+    sprite.data.frames = json.sprite;
     sprite.ind = Some(0);
+
     Ok(())
+
 }
 
 
@@ -187,19 +161,18 @@ fn write_to_sprite(
 
     let mut sprite_frame = Vec::new();
     for row in 0..input_field.rows.len() {
-        let mut hor: Vec<TerminalChar> = Vec::new();
+        let mut hor: Vec<u8> = Vec::new();
 
 
         for ch in input_field.rows.get(row).unwrap_or(&empty_char).downcast_ref::<String>().unwrap().chars() {
-            hor.push(TerminalChar::from_char(ch));
+            hor.push(ch as u8);
         }
 
         sprite_frame.push(hor);
     }
 
-    if let Some(el) = sprite.data.frames.get_mut(ind) {
-        *el = sprite_frame;
-    }
+    sprite.data.frames[ind] = sprite_frame;
+
 }
 
 
@@ -396,15 +369,17 @@ fn export_sprite(
 
 fn export_json(file_name: &str, sprite: &Sprite) -> io::Result<()> {
     let file_name = format!("{}", file_name);
+
     let serialized = JsonFormat {
         frame_count: sprite.data.frames.len() as u16,
         width: sprite.width.value,
         height: sprite.height.value,
-        sprite: format!("{}", sprite.data),
+        sprite: sprite.data.frames.clone(),
     };
 
     let mut file = fs::File::create(file_name)?;
     serde_json::to_writer_pretty(&mut file, &serialized)?;
+
     file.flush()?;
 
     Ok(())
@@ -417,8 +392,7 @@ fn trigger_reload(
     ind: u16,
     sprite: &mut ResMut<Sprite>,
 ) {
-    let frame = &sprite.data.frames.get(ind as usize).unwrap();
-
+    let frame = sprite.data.frames.get(ind as usize).unwrap().downcast_ref::<Vec<Vec<u8>>>().unwrap();
 
     let mut new_input_field = InputField::default();
     new_input_field.height = sprite.height.value;
@@ -431,8 +405,8 @@ fn trigger_reload(
     } else {
         for row in frame.iter() {
             let mut str = String::new();
-            for ch in row.iter() {
-                str.push(ch.char as char)
+            for ch in row.downcast_ref::<Vec<u8>>().unwrap().iter() {
+                str.push(ch.downcast_ref::<u8>().unwrap().clone() as char)
             }
             new_input_field.rows.push(str);
         }
@@ -486,7 +460,6 @@ fn main_window(
 
                 if save.clicked() {
                     if file_name.name != "" {
-                        println!("Creating: {}.{}", file_name.name, FILE_EXT);
                         *editor_step = EditorStep::FileCreated;
                     }
                 }
