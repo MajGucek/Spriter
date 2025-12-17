@@ -1,6 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-
 mod constants;
 mod sprite_format;
 
@@ -16,7 +15,7 @@ use bevy_egui::*;
 use egui::{Align, Color32, FontId, FontSelection, Frame, Layout, Margin, Pos2, Rounding, Stroke};
 use serde::{Deserialize, Serialize};
 use crate::constants::*;
-use crate::sprite_format::Sprite;
+use crate::sprite_format::{MultilineString, Sprite};
 
 #[derive(Resource)]
 struct FileName {
@@ -36,15 +35,6 @@ enum FileState {
     None,
     Exporting,
     Importing,
-}
-
-
-
-#[derive(Resource, Default)]
-struct InputField {
-    width: u16,
-    height: u16,
-    rows: Vec<String>,
 }
 
 
@@ -91,7 +81,7 @@ fn main() {
             ..default()
         }))
         .insert_state(FileState::None)
-        .insert_resource(InputField::default())
+        .insert_resource(MultilineString::default())
         .insert_state(EditorState::None)
         .insert_resource(EditorStep::None)
         .insert_resource(Sprite::default())
@@ -113,7 +103,7 @@ fn main() {
 
 
 fn import_sprite(
-    mut input_field: ResMut<InputField>,
+    mut multiline_string: ResMut<MultilineString>,
     mut sprite: ResMut<Sprite>,
     file: Res<FileName>,
     mut export_state: ResMut<NextState<FileState>>,
@@ -121,15 +111,17 @@ fn import_sprite(
     mut editor_step: ResMut<EditorStep>,
 ) {
     read_file(format!("{}.{}", file.name, FILE_EXT), &mut sprite).expect("Error");
-    input_field.height = sprite.height.value;
-    input_field.width = sprite.width.value;
+    multiline_string.height = sprite.height.value;
+    multiline_string.width = sprite.width.value;
+
     // Convert Sprite: Vec<Vec<Vec<u8>>>[0] to Vec<String>
-    input_field.rows = sprite.data.frames.get(0usize).unwrap().downcast_ref::<Vec<Vec<u8>>>().unwrap()
+    let vec_str = sprite.data.frames.get(0usize).unwrap().downcast_ref::<Vec<Vec<u8>>>().unwrap()
         .iter().map(|row| {
             row.downcast_ref::<Vec<u8>>().unwrap().iter().map(|ch| {
                 ch.downcast_ref::<u8>().unwrap().clone() as char
             }).collect::<Vec<char>>().into_iter().collect()
         }).collect::<Vec<String>>();
+    multiline_string.text = vec_str.clone().join("\n");
 
     sprite.move_ind(0u16).expect("Cannot move to index 0");
 
@@ -154,22 +146,17 @@ fn read_file(file_path: String, sprite: &mut Sprite) -> io::Result<()> {
 
 fn write_to_sprite(
     mut sprite: ResMut<Sprite>,
-    input_field: Res<InputField>,
+    multiline_string: Res<MultilineString>,
 ) {
     let ind = sprite.ind.unwrap().clone() as usize;
-    let empty_char = String::from(" ");
-
-    let mut sprite_frame = Vec::new();
-    for row in 0..input_field.rows.len() {
-        let mut hor: Vec<u8> = Vec::new();
-
-
-        for ch in input_field.rows.get(row).unwrap_or(&empty_char).downcast_ref::<String>().unwrap().chars() {
-            hor.push(ch as u8);
-        }
-
-        sprite_frame.push(hor);
-    }
+    
+    let sprite_frame = multiline_string.text.split("\n").map(|row| row.to_owned())
+        .collect::<Vec<String>>()
+        // Vec<&str>
+        .iter().map(|s| {
+            s.downcast_ref::<String>().unwrap_or(&String::new()).chars().map(|ch| ch as u8)
+                .collect::<Vec<u8>>()
+        }).collect::<Vec<Vec<u8>>>();
 
     sprite.data.frames[ind] = sprite_frame;
 
@@ -178,12 +165,12 @@ fn write_to_sprite(
 
 fn editor_window(
     mut egui_ctx: EguiContexts,
-    mut input_field: ResMut<InputField>,
+    mut multiline_string: ResMut<MultilineString>,
 ) {
     let gui = egui::Window::new("Editor")
         .title_bar(true)
         .min_size(egui::vec2(300.0, 550.0))
-        .default_size(egui::vec2(400.0, 600.0))
+        .default_size(egui::vec2(300.0, 600.0))
         .default_pos(Pos2::new(200.0, 0.0))
         .frame(Frame {
             fill: MENU_BG,
@@ -198,23 +185,51 @@ fn editor_window(
             .inner_margin(Margin::same(3.0))
             .show(ui, |ui| {
                 ui.vertical(|ui| {
-                    let width = input_field.width.clone();
-                    for row in 0..input_field.height {
-                        ui.add(
-                            egui::TextEdit::singleline(&mut input_field.rows[row as usize])
-                                //.id(id)
-                                .frame(false)
-                                .char_limit(width as usize)
-                                .horizontal_align(Align::LEFT)
-                                .desired_width(ui.available_width())
-                                .font(FontSelection::from(FontId::new(FONT_SIZE * 2., FONT)))
+                    let font_size = FONT_SIZE;
+                    let cell_w = font_size * 0.6;
+                    let cell_h = font_size;
+                    let text_width  = cell_w * (multiline_string.width + 1) as f32;
+                    let text_height = cell_h * multiline_string.height as f32;
+
+                    let desired_size = egui::vec2(text_width, text_height);
+
+                    let response = ui.add_sized(
+                        desired_size,
+                        egui::TextEdit::multiline(&mut multiline_string.text)
+                            .code_editor()
+                            .horizontal_align(Align::LEFT)
+                            .font(FontSelection::from(FontId::new(FONT_SIZE, FONT))),
+                    );
+
+
+
+                    if response.changed() {
+                        multiline_string.text = clamp_multiline(
+                            &multiline_string.text,
+                            multiline_string.width as usize,
+                            multiline_string.height as usize,
                         );
+
                     }
                 });
             });
 
     });
 }
+
+fn clamp_multiline(text: &str, max_cols: usize, max_rows: usize) -> String {
+    text.split('\n')
+        .take(max_rows)
+        .map(|line| {
+            line.chars()
+                .take(max_cols)
+                .collect::<String>()
+        })
+        .collect::<Vec<String>>()
+        .join("\n")
+}
+
+
 
 
 fn settings_window(
@@ -223,7 +238,7 @@ fn settings_window(
     mut sprite: ResMut<Sprite>,
     mut editor_step: ResMut<EditorStep>,
     mut next: ResMut<NextState<EditorState>>,
-    mut input_field: ResMut<InputField>,
+    mut multiline_string: ResMut<MultilineString>,
     mut export_state: ResMut<NextState<FileState>>,
 ) {
     if *editor_step == EditorStep::None { return; }
@@ -289,7 +304,8 @@ fn settings_window(
                 if add.clicked() {
                     next.set(EditorState::Show);
                     sprite.add_frame();
-                    trigger_reload(&mut input_field, sprite.ind.unwrap(), &mut sprite);
+                    trigger_reload(&mut multiline_string, sprite.ind.unwrap(), &mut sprite);
+                    //trigger_reload(&mut input_field, sprite.ind.unwrap(), &mut sprite);
                 }
             });
             match sprite.ind {
@@ -305,7 +321,7 @@ fn settings_window(
                         if move_left.clicked() {
                             let new_ind = ok.saturating_sub(1).clone();
                             match sprite.move_ind(new_ind) {
-                                Ok(_) => trigger_reload(&mut input_field, new_ind, &mut sprite),
+                                Ok(_) => trigger_reload(&mut multiline_string, new_ind, &mut sprite),
                                 Err(_) => {
                                     //println!("Cannot move index");
                                 }
@@ -315,7 +331,7 @@ fn settings_window(
                         if move_right.clicked() {
                             let new_ind = ok.saturating_add(1).clone();
                             match sprite.move_ind(new_ind) {
-                                Ok(_) => trigger_reload(&mut input_field, new_ind, &mut sprite),
+                                Ok(_) => trigger_reload(&mut multiline_string, new_ind, &mut sprite),
                                 Err(_) => {
                                     //println!("Cannot move index");
                                 }
@@ -336,9 +352,9 @@ fn settings_window(
 
         if apply_clicked {
             *editor_step = EditorStep::SettingsSet;
-            input_field.width = sprite.width.value.clone();
-            input_field.height = sprite.height.value.clone();
-            input_field.rows = vec![String::new(); input_field.height as usize];
+            multiline_string.width = sprite.width.value.clone();
+            multiline_string.height = sprite.height.value.clone();
+            multiline_string.text = String::new();
         }
     });
 }
@@ -388,31 +404,30 @@ fn export_json(file_name: &str, sprite: &Sprite) -> io::Result<()> {
 
 
 fn trigger_reload(
-    input_field: &mut ResMut<InputField>,
+    multiline_string: &mut ResMut<MultilineString>,
     ind: u16,
     sprite: &mut ResMut<Sprite>,
 ) {
     let frame = sprite.data.frames.get(ind as usize).unwrap().downcast_ref::<Vec<Vec<u8>>>().unwrap();
 
-    let mut new_input_field = InputField::default();
-    new_input_field.height = sprite.height.value;
-    new_input_field.width = sprite.width.value;
+    let mut new_multiline_string = MultilineString::default();
+    new_multiline_string.height = sprite.height.value;
+    new_multiline_string.width = sprite.width.value;
 
     if frame.is_empty() {
-        for _ in 0..new_input_field.height {
-            new_input_field.rows.push(String::new());
-        }
+        new_multiline_string.text = String::new();
     } else {
         for row in frame.iter() {
             let mut str = String::new();
             for ch in row.downcast_ref::<Vec<u8>>().unwrap().iter() {
                 str.push(ch.downcast_ref::<u8>().unwrap().clone() as char)
             }
-            new_input_field.rows.push(str);
+            new_multiline_string.text.push_str(str.as_str());
+            new_multiline_string.text.push('\n');
         }
     }
 
-    **input_field = new_input_field;
+    **multiline_string = new_multiline_string;
 
 }
 
@@ -483,9 +498,9 @@ fn main_window(
 
 fn check_settings(
     sprite: Res<Sprite>,
-    input_field: Res<InputField>,
+    multiline_string: Res<MultilineString>,
 ) {
-    if sprite.height.value != input_field.height || sprite.width.value != input_field.width {
+    if sprite.height.value != multiline_string.height || sprite.width.value != multiline_string.width {
         panic!("WOW, shouldn't happen, de-sync error!");
     }
 }

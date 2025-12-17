@@ -46,6 +46,32 @@ pub enum IndexMoveError {
 }
 
 
+#[derive(Debug, Resource, Default)]
+pub struct MultilineString {
+    pub width: u16,
+    pub height: u16,
+    pub text: String,
+}
+
+impl TextBuffer for MultilineString {
+    fn is_mutable(&self) -> bool {
+        true
+    }
+
+    fn as_str(&self) -> &str {
+        self.text.as_str()
+    }
+
+    fn insert_text(&mut self, text: &str, char_index: usize) -> usize {
+        self.text.insert_text(text, char_index)
+    }
+
+    fn delete_char_range(&mut self, char_range: Range<usize>) {
+        self.text.delete_char_range(char_range);
+    }
+}
+
+
 
 #[derive(Debug, Default)]
 pub struct IntInput {
